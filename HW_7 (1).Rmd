@@ -1,0 +1,250 @@
+The data for this lab is in the file Wine Data for Lab.csv. You will be 
+analyzing the text in the column labeled “description”. This contains short 
+descriptions of wines, done by tasters. The tasters also assigned a point 
+score on a 100 point scale (only wines with a score of 80 or greater were 
+listed on its site by Wine Enthusiast magazine, from where this data is 
+scraped). 
+1. Your first task will be to score the sentiment in the text. Use the 
+SentimentR package. 
+a. Plot a histogram of the sentiment scores and include below. 
+
+
+
+
+```{r}
+library(ggplot2)
+library(sentimentr)
+
+scre2<-read.csv('Wine Data for Lab.csv')
+
+
+txt<-scre$description
+
+sentiment = sentiment_by(txt)                  # score sentiments
+#
+# This information is placed in a data frame
+sentiment = data.frame(sentiment)
+sentiment$txt=scre$description
+sentiment$country<-scre$country
+
+
+by(sentiment$ave_sentiment,sentiment$country,summary)
+qplot(sentiment$ave_sentiment, geom="histogram",binwidth=0.1,main="Wine Sentiment Histogram:")
+##
+
+```
+
+
+b. What is the average sentiment score of all wines in the dataset?
+
+```{r}
+mean(sentiment$ave_sentiment)
+```
+
+c. What is the average sentiment score of all wines from New Zealand? 
+```{r}
+cnd<-c(scre$country=='New Zealand')
+mean(sentiment$ave_sentiment[cnd])
+
+
+sb<-subset(sentiment, scre$country=='New Zealand')
+
+```
+
+d. What is the average score of all wines in the $20-$29.99 price range?
+
+```{r}
+p_cnd<- c(scre$price>=20 & scre$price<30)
+mean(sentiment$ave_sentiment[p_cnd])
+```
+
+
+2. The descriptions tend to communicate the way the wine will taste (using 
+words like “fruity” and “acidic”) and do not always describe how good 
+or bad a wine is. So, it is not clear that we will have quality information 
+in the text. 
+a. To check if the sentiment score accurately represents quality, run Yes/No
+The P-value for the coefficient of points is _________
+
+
+```{r}
+sentiment$points<-scre$points
+
+model_lr<-lm(ave_sentiment~points,data=sentiment)
+
+summary(model_lr)
+
+
+```
+
+b. Is points a significant predictor of sentiment score when you control 
+for price? 
+Yes/No
+The P-value for the coefficient of points is _________
+
+
+```{r}
+sentiment$price<-scre$price
+
+model_lr_p<-lm(ave_sentiment~points+price,data=sentiment)
+
+summary(model_lr_p)
+```
+3. Create a label from the sentiment scores as follows. Label the wines with 
+the top 40% of scores as “Positive”, the bottom 60% of wines as 
+“Negative”. 
+a. Do the pre-processing of the text and build the TDM/DTM using all the 
+steps in the file TM Example V2.RMD. When you remove sparse terms 
+leave the sparse parameter at 0.95. You need not do any stemming or 
+stem completion (but are free to do so if you like). Construct a data 
+frame where terms are the columns, and each description is an 
+observation. Combine this with the labels you created above and 
+partition the data set using the seed 12345. Retain 70% as the 
+training set, with the rest as the test set. You will now build a 
+model to predict this label using the text description. 
+```{r}
+library('SparseM');
+library('tm');
+dd<-sort(sentiment$ave_sentiment,decreasing = TRUE)
+ft<-floor(length(dd)*0.4)
+
+pv<-dd[ft]
+
+sentiment$st<-ifelse(sentiment$ave_sentiment>=pv,'Positive','Negative')
+
+
+df<- read.csv('Wine Data for Lab.csv')
+
+dfvector <- as.vector(df$description)
+
+# CREATE SOURCE FOR VECTORS
+dfsource <- VectorSource(dfvector)
+
+# CREATE CORPUS FOR DATA
+dfcorpus <- Corpus(dfsource);
+
+# PERFORMING THE VARIOUS TRANSFORMATIONS on "traincorpus" and "testcorpus" DATASETS 
+# SUCH AS TRIM WHITESPACE, REMOVE PUNCTUATION, REMOVE STOPWORDS.
+dfcorpus <- tm_map(dfcorpus,content_transformer(stripWhitespace));
+dfcorpus <- tm_map(dfcorpus,content_transformer(tolower));
+dfcorpus <- tm_map(dfcorpus, content_transformer(removeWords),stopwords("english"));
+dfcorpus <- tm_map(dfcorpus,content_transformer(removePunctuation));
+dfcorpus <- tm_map(dfcorpus,content_transformer(removeNumbers));
+# 
+tdm1 <- TermDocumentMatrix(dfcorpus)
+tdm1 = removeSparseTerms(tdm1, 0.95)
+# CREATE TERM DOCUMENT MATRIX
+dfmatrix <- t(tdm1)
+
+# TRAIN NAIVE BAYES MODEL
+df2 <- data.frame(as.matrix(dfmatrix))
+
+set.seed(12345)
+
+train <- sample(nrow(df2),0.7*nrow(df))
+# Create two partitions
+dftrain <- df[train,] # Retains only rows in train1
+dfvalidation <- df[-train,]
+
+
+traindata = df2[train,]
+testdata  = df2[-train,]
+trainlabel = sentiment$st[train]
+testlabel  = sentiment$st[-train]
+#model <- naiveBayes(traindata,trainlabel);
+```
+
+b. Use the training data set to build a model that predicts the label 
+created above using a Naïve Bayes model. Use all the terms in your 
+TDM. Compute the confusion matrix in the test data set and report the 
+accuracy below. 
+```{r}
+library('e1071')
+model_nb <- naiveBayes(traindata,trainlabel)
+Predictions <- predict(model_nb,testdata)
+length(Predictions)
+cm<-table(testlabel,Predictions)
+cm
+```
+
+```{r}
+acc<-(cm[1]+cm[4])/(cm[1]+cm[2]+cm[3]+cm[4])
+acc
+```
+c. Build a linear regression model to predict the sentiment score using 
+all the terms in your TDM. Partition the data as before using the 
+same seed 12345. Use the training data to build your regression model 
+and use the test data set to compute RMSE. Report below. 
+
+```{r}
+set.seed(12345)
+train <- sample(nrow(df2),0.7*nrow(df2))
+df2$sen<-sentiment$ave_sentiment
+
+traindata = df2[train,]
+testdata  = df2[-train,]
+#trainlabel = sentiment$ave_sentiment[train]
+#testlabel  = sentiment$ave_sentiment[-train]
+
+model_lR<- lm(sen~., data=traindata)
+
+summary(model_lR)
+
+lr_predict<-predict(model_lR, testdata)
+
+
+RMSE<- sqrt(mean((lr_predict-traindata$sen)^2))
+RMSE
+```
+
+
+
+
+```{r}
+(freq.terms <- findFreqTerms(tdm1, lowfreq = 15))
+term.freq <- rowSums(as.matrix(tdm1))
+term.freq <- subset(term.freq, term.freq >= 15)
+df3 <- data.frame(term = names(term.freq), freq = term.freq)
+library(ggplot2)
+ggplot(df3, aes(x = term, y = freq)) + geom_bar(stat = "identity") +
+  xlab("Terms") + ylab("Count") + coord_flip()
+#
+## hclust ####
+matrix1 <- as.matrix(tdm1)
+distMatrix <- dist(scale(matrix1))
+#fit <- hclust(distMatrix, method="ward.D2")
+fit <- hclust(distMatrix, method="average")
+# plot dendrogram ####
+plot(fit, cex=0.9, hang=-1,
+     main="Word Cluster Dendrogram")
+# cut tree
+rect.hclust(fit, k=5)
+(groups <- cutree(fit, k=5))
+#
+XT = t(matrix1)
+XD = data.frame(XT)
+km.out <- kmeans(XD,4,nstart=20)
+# 
+mydata <- XD
+wss <- (nrow(mydata)-1)*sum(apply(mydata,2,var))
+  for (i in 2:15) wss[i] <- sum(kmeans(mydata,
+                                       centers=i)$withinss)
+plot(1:15, wss, type="b", xlab="Number of Clusters",
+     ylab="Within groups sum of squares")
+XD$cluster <- km.out$cluster
+by(XD[,-45],as.factor(XD[,45]),colMeans)
+```
+
+
+
+
+```{r}
+library("wordcloud")
+library("RColorBrewer")
+
+wordcloud(words = df3$term, freq = df3$freq, min.freq = 1,
+          max.words=200, random.order=FALSE, rot.per=0.35, 
+          colors=brewer.pal(8, "Dark2"))
+```
+
+
